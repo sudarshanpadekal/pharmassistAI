@@ -1,0 +1,18 @@
+# Environment & Secrets
+.env
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Node / React
+node_modules/
+frontend/dist/
+.vite/
+
+# OS / Editor
+.DS_Store
+.vscode/
