@@ -41,7 +41,7 @@ class RegisterRequest(BaseModel):
     full_name: str = Field(..., min_length=2, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8)
-    phone: Optional[str] = Field(None, pattern=r"^\+?[0-9\-]{10,15}\$")
+    phone: Optional[str] = Field(None, pattern=r"^\+?[0-9\-]{10,15}$")
     date_of_birth: Optional[str] = None
 
 class LoginRequest(BaseModel):
