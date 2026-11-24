@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import base64
 from typing import Optional
 import psycopg2
 from psycopg2.extras import RealDictCursor
@@ -212,66 +213,102 @@ def compare_pharmacies(prescription_id: int):
 @app.post("/api/extract")
 async def extract_prescription(raw_text: str = Form(""), rx_image: Optional[UploadFile] = File(None)):
     image_bytes = await rx_image.read() if rx_image and rx_image.filename else None
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
 
     parsed = None
-    if api_key and api_key != "your_gemini_api_key_here" and (raw_text or image_bytes):
+    if api_key and api_key != "gsk_your_actual_groq_api_key_here" and (raw_text or image_bytes):
         try:
-            from google import genai
-            from google.genai import types
-            client = genai.Client(api_key=api_key)
-            prompt = (
-                "Extract doctor_reg_no, diagnosis, and medicines array "
-                "(each with brand_name, prescribed_dose, frequency, duration_days, instructions) as JSON."
-            )
-            contents = [prompt]
-            if raw_text:
-                contents.append(raw_text)
-            if image_bytes:
-                contents.append(types.Part.from_bytes(data=image_bytes, mime_type=rx_image.content_type or "image/jpeg"))
-            res = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=contents,
-                config={"response_mime_type": "application/json"},
-            )
-            parsed = json.loads(res.text)
-        except Exception:
-            parsed = None
+            from groq import Groq
+            client = Groq(api_key=api_key)
 
-    if not parsed:
-        reg_match = re.search(r"(KMC-\d+)", raw_text, re.IGNORECASE)
-        diag_match = re.search(r"Diagnosis:\s*([^\n.;]+)", raw_text, re.IGNORECASE)
-        parsed = {
-            "doctor_reg_no": reg_match.group(1).upper() if reg_match else "",
-            "diagnosis": diag_match.group(1).strip() if diag_match else "",
-            "medicines": [
-                {
-                    "brand_name": "Dolo 650",
-                    "prescribed_dose": "1 tablet",
-                    "frequency": "Twice daily",
-                    "duration_days": 5,
-                    "instructions": "After food",
-                }
-            ],
-        }
+            system_prompt = (
+                "You are a medical prescription parser. Return ONLY valid JSON with keys: "
+                "doctor_name (string), doctor_reg_no (string), diagnosis (string), and medicines "
+                "(array of objects with brand_name, prescribed_dose, frequency, duration_days as integer, instructions). "
+                "Use empty strings if a field is not mentioned."
+            )
+
+            if image_bytes:
+                b64_img = base64.b64encode(image_bytes).decode("utf-8")
+                mime_type = rx_image.content_type or "image/jpeg"
+                user_content = [
+                    {"type": "text", "text": raw_text or "Extract the prescription details from this image."},
+                    {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{b64_img}"}},
+                ]
+                model_id = "qwen/qwen3.8-27b"
+            else:
+                user_content = raw_text
+                model_id = "llama-3.3-70b-versatile"
+
+            res = client.chat.completions.create(
+                model=model_id,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                response_format={"type": "json_object"},
+                temperature=0,
+            )
+            parsed = json.loads(res.choices[0].message.content)
+        except Exception as e:
+            print(f"[Groq Extract Error]: {e}")
+            parsed = None
 
     conn = get_db()
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                "SELECT doctor_id FROM doctors WHERE registration_number ILIKE %s LIMIT 1;",
-                (parsed.get("doctor_reg_no", ""),),
-            )
-            doc = cur.fetchone()
+            if not parsed:
+                reg_match = re.search(r"(KMC-\d+)", raw_text, re.IGNORECASE)
+                doc_name_match = re.search(r"Dr\.?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)", raw_text, re.IGNORECASE)
+                diag_match = re.search(r"Diagnosis:\s*([^\n.;]+)", raw_text, re.IGNORECASE)
+
+                cur.execute("SELECT medicine_id, brand_name, generic_name FROM medicines;")
+                matched_meds = []
+                for m in cur.fetchall():
+                    base_brand = m["brand_name"].split()[0]
+                    if re.search(rf"\b{re.escape(base_brand)}\b", raw_text, re.IGNORECASE):
+                        matched_meds.append({
+                            "brand_name": m["brand_name"],
+                            "prescribed_dose": "1 tablet",
+                            "frequency": "Twice daily",
+                            "duration_days": 5,
+                            "instructions": "After food",
+                            "resolved_medicine_id": m["medicine_id"],
+                        })
+
+                parsed = {
+                    "doctor_reg_no": reg_match.group(1).upper() if reg_match else "",
+                    "doctor_name": doc_name_match.group(1).strip() if doc_name_match else "",
+                    "diagnosis": diag_match.group(1).strip() if diag_match else "",
+                    "medicines": matched_meds,
+                }
+
+            doc = None
+            if parsed.get("doctor_reg_no"):
+                cur.execute(
+                    "SELECT doctor_id FROM doctors WHERE registration_number ILIKE %s LIMIT 1;",
+                    (parsed["doctor_reg_no"],),
+                )
+                doc = cur.fetchone()
+            if not doc and parsed.get("doctor_name"):
+                clean_name = re.sub(r"^Dr\.?\s*", "", parsed["doctor_name"], flags=re.IGNORECASE).strip()
+                cur.execute(
+                    "SELECT doctor_id FROM doctors WHERE doctor_name ILIKE %s LIMIT 1;",
+                    (f"%{clean_name}%",),
+                )
+                doc = cur.fetchone()
             parsed["resolved_doctor_id"] = doc["doctor_id"] if doc else ""
 
             for med in parsed.get("medicines", []):
-                cur.execute(
-                    "SELECT medicine_id FROM medicines WHERE brand_name ILIKE %s OR generic_name ILIKE %s LIMIT 1;",
-                    (f"%{med.get('brand_name', '')}%", f"%{med.get('brand_name', '')}%"),
-                )
-                m = cur.fetchone()
-                med["resolved_medicine_id"] = m["medicine_id"] if m else ""
+                if not med.get("resolved_medicine_id"):
+                    base_word = med.get("brand_name", "").split()[0] if med.get("brand_name") else ""
+                    if base_word:
+                        cur.execute(
+                            "SELECT medicine_id FROM medicines WHERE brand_name ILIKE %s OR generic_name ILIKE %s LIMIT 1;",
+                            (f"%{base_word}%", f"%{base_word}%"),
+                        )
+                        m = cur.fetchone()
+                        med["resolved_medicine_id"] = m["medicine_id"] if m else ""
     finally:
         conn.close()
 
