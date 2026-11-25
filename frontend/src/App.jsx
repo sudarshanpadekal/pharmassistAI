@@ -1321,7 +1321,6 @@ function AuthPage({ onLogin, alert, setAlert }) {
     { id: "pharmacist", icon: "bi-capsule",     label: "Pharmacist" },
     { id: "pharmacy",   icon: "bi-building",    label: "Pharmacy" },
     { id: "doctor",     icon: "bi-heart-pulse", label: "Doctor" },
-    { id: "admin",      icon: "bi-shield-lock", label: "Admin" },
   ];
 
   return (
@@ -1366,8 +1365,8 @@ function AuthPage({ onLogin, alert, setAlert }) {
         </div>
         <div className="auth-panel-sub">
           {mode === "login"
-            ? "Sign in to your dispensing portal account"
-            : "Register as pharmacist, pharmacy, doctor, or admin"}
+            ? "Sign in to your account"
+            : "Register as pharmacist, pharmacy or doctor"}
         </div>
 
         <div className="pa-tabs">
@@ -1389,7 +1388,7 @@ function AuthPage({ onLogin, alert, setAlert }) {
               {/* Role selector */}
               <div className="pa-field">
                 <label className="pa-label">Account Role</label>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
                   {roleOptions.map(r => (
                     <button
                       key={r.id} type="button"
@@ -1549,7 +1548,6 @@ function PortalShell({ user, onLogout, children, activeSection, setActiveSection
     ...(user.role === "doctor" ? [
       { id: "extract", icon: "bi-stars", label: "AI Extractor" },
       { id: "prescriptions", icon: "bi-file-medical", label: "My Prescriptions" },
-      { id: "inventory", icon: "bi-box-seam", label: "Inventory" },
     ] : []),
   ];
 
@@ -1796,6 +1794,10 @@ export default function App() {
     const res    = await fetch(`${API_BASE}/api/extract`, { method: "POST", body: fd });
     const parsed = await res.json();
     setExtracting(false);
+    if (!res.ok) {
+      setAlert({ type: "danger", text: parsed.detail || "Extraction failed." });
+      return;
+    }
     setRxForm(prev => ({
       ...prev,
       doctor_id: user.role === "doctor" ? user.doctor_id : parsed.resolved_doctor_id || prev.doctor_id,
@@ -2085,8 +2087,8 @@ export default function App() {
           <div className="pa-card-title-icon" style={{ background: "var(--violet-muted)", color: "var(--violet)" }}>
             <i className="bi bi-stars" />
           </div>
-          AI / NLP Prescription Extractor
-          <span className="pa-badge pa-badge-violet" style={{ marginLeft: 8 }}>Groq LLM</span>
+          Prescription Extractor
+          {/* <span className="pa-badge pa-badge-violet" style={{ marginLeft: 8 }}>Groq LLM</span> */}
         </div>
       </div>
       <div className="pa-card-body">
@@ -2505,7 +2507,7 @@ export default function App() {
     approvals:     renderApprovals(),
     extract:       renderExtract(),
     prescriptions: renderPrescriptions(),
-    inventory:     renderInventory(),
+    inventory:     user.role !== "doctor" ? renderInventory() : null,
   };
 
   return (
