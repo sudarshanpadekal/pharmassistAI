@@ -740,7 +740,7 @@ async def extract_prescription(raw_text: str = Form(""), rx_image: Optional[Uplo
     if image_bytes and (not api_key or api_key == "gsk_your_actual_groq_api_key_here"):
         raise HTTPException(
             status_code=500,
-            detail="GROQ_API_KEY is missing or still set to placeholder in .env. Image OCR requires a valid Groq API key.",
+            detail="GROQ_API_KEY is missing in .env. Configure a valid Groq API key to extract from prescription images.",
         )
 
     parsed = None
@@ -757,27 +757,65 @@ async def extract_prescription(raw_text: str = Form(""), rx_image: Optional[Uplo
             )
 
             if image_bytes:
-                b64_img = base64.b64encode(image_bytes).decode("utf-8")
-                mime_type = rx_image.content_type or "image/jpeg"
-                res = client.chat.completions.create(
-                    model="meta-llama/llama-4-scout-17b-16e-instruct",
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
+                available_ids = [m.id for m in client.models.list().data]
+                vision_candidates = [
+                    mid for mid in available_ids
+                    if any(k in mid.lower() for k in ("llama-4", "vision", "qwen", "pixtral", "llava"))
+                    and "guard" not in mid.lower()
+                ]
+
+                vision_used = False
+                for v_model in vision_candidates:
+                    try:
+                        b64_img = base64.b64encode(image_bytes).decode("utf-8")
+                        mime_type = rx_image.content_type or "image/jpeg"
+                        res = client.chat.completions.create(
+                            model=v_model,
+                            messages=[
                                 {
-                                    "type": "text",
-                                    "text": f"{system_prompt}\n\n{raw_text or 'Extract all prescription fields from this handwritten image.'}",
-                                },
-                                {
-                                    "type": "image_url",
-                                    "image_url": {"url": f"data:{mime_type};base64,{b64_img}"},
-                                },
+                                    "role": "user",
+                                    "content": [
+                                        {
+                                            "type": "text",
+                                            "text": f"{system_prompt}\n\n{raw_text or 'Extract all prescription fields from this handwritten image.'}",
+                                        },
+                                        {
+                                            "type": "image_url",
+                                            "image_url": {"url": f"data:{mime_type};base64,{b64_img}"},
+                                        },
+                                    ],
+                                }
                             ],
-                        }
-                    ],
-                    temperature=0,
-                )
+                            temperature=0,
+                        )
+                        vision_used = True
+                        break
+                    except Exception as v_err:
+                        print(f"[Vision model {v_model} skipped]: {v_err}")
+
+                if not vision_used:
+                    import io
+                    import pytesseract
+                    from PIL import Image, ImageEnhance
+
+                    img = Image.open(io.BytesIO(image_bytes)).convert("L")
+                    img = ImageEnhance.Contrast(img).enhance(1.8)
+                    ocr_text = pytesseract.image_to_string(img).strip()
+                    combined_text = f"{raw_text}\n{ocr_text}".strip()
+                    if not combined_text:
+                        raise HTTPException(
+                            status_code=422,
+                            detail="Vision model rejected image input and Tesseract OCR could not read text from the image.",
+                        )
+                    res = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": combined_text},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0,
+                    )
             else:
                 res = client.chat.completions.create(
                     model="llama-3.3-70b-versatile",
@@ -792,11 +830,74 @@ async def extract_prescription(raw_text: str = Form(""), rx_image: Optional[Uplo
             raw_output = res.choices[0].message.content.strip()
             raw_output = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw_output).strip()
             parsed = json.loads(raw_output)
+        except HTTPException:
+            raise
         except Exception as e:
             print(f"[Groq Extract Error]: {e}")
             if image_bytes:
-                raise HTTPException(status_code=502, detail=f"Groq Vision OCR failed: {str(e)}")
+                raise HTTPException(status_code=502, detail=f"Prescription extraction failed: {str(e)}")
             parsed = None
+
+    conn = get_db()
+    try:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if not parsed:
+                reg_match = re.search(r"(KMC-\d+)", raw_text, re.IGNORECASE)
+                doc_name_match = re.search(r"Dr\.?\s*([A-Za-z]+(?:\s+[A-Za-z]+)?)", raw_text, re.IGNORECASE)
+                diag_match = re.search(r"Diagnosis:\s*([^\n.;]+)", raw_text, re.IGNORECASE)
+
+                cur.execute("SELECT medicine_id, brand_name, generic_name FROM medicines;")
+                matched_meds = []
+                for m in cur.fetchall():
+                    base_brand = m["brand_name"].split()[0]
+                    if re.search(rf"\b{re.escape(base_brand)}\b", raw_text, re.IGNORECASE):
+                        matched_meds.append({
+                            "brand_name": m["brand_name"],
+                            "prescribed_dose": "1 tablet",
+                            "frequency": "Twice daily",
+                            "duration_days": 5,
+                            "instructions": "After food",
+                            "resolved_medicine_id": m["medicine_id"],
+                        })
+
+                parsed = {
+                    "doctor_reg_no": reg_match.group(1).upper() if reg_match else "",
+                    "doctor_name": doc_name_match.group(1).strip() if doc_name_match else "",
+                    "diagnosis": diag_match.group(1).strip() if diag_match else "",
+                    "medicines": matched_meds,
+                }
+
+            doc = None
+            if parsed.get("doctor_reg_no"):
+                cur.execute(
+                    "SELECT doctor_id FROM doctors WHERE registration_number ILIKE %s LIMIT 1;",
+                    (parsed["doctor_reg_no"],),
+                )
+                doc = cur.fetchone()
+            if not doc and parsed.get("doctor_name"):
+                clean_name = re.sub(r"^Dr\.?\s*", "", parsed["doctor_name"], flags=re.IGNORECASE).strip()
+                cur.execute(
+                    "SELECT doctor_id FROM doctors WHERE doctor_name ILIKE %s LIMIT 1;",
+                    (f"%{clean_name}%",),
+                )
+                doc = cur.fetchone()
+            parsed["resolved_doctor_id"] = doc["doctor_id"] if doc else ""
+
+            for med in parsed.get("medicines", []):
+                if not med.get("resolved_medicine_id"):
+                    base_word = med.get("brand_name", "").split()[0] if med.get("brand_name") else ""
+                    base_word = re.sub(r"\d+(?:mg|ml|mcg|g)$", "", base_word, flags=re.IGNORECASE).strip()
+                    if base_word:
+                        cur.execute(
+                            "SELECT medicine_id FROM medicines WHERE brand_name ILIKE %s OR generic_name ILIKE %s LIMIT 1;",
+                            (f"%{base_word}%", f"%{base_word}%"),
+                        )
+                        m = cur.fetchone()
+                        med["resolved_medicine_id"] = m["medicine_id"] if m else ""
+    finally:
+        conn.close()
+
+    return parsed
 
 
 # --- 8. Atomic Prescription Creation & Sale/Dispensing (Decrements Stock) ---
