@@ -16,3 +16,10 @@ frontend/dist/
 # OS / Editor
 .DS_Store
 .vscode/
+
+CONTEXT.md
+
+# Backend RBAC staging files (runtime-generated, never commit)
+backend/role_bindings.json
+backend/pending_doctors.json
+backend/pending_pharmacists.json
