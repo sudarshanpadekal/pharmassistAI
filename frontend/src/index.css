@@ -134,10 +134,7 @@ h1, h2, h3, h4, h5, h6 {
   flex-direction: column;
   justify-content: center;
   padding: 64px;
-  background:
-    radial-gradient(ellipse 80% 60% at 20% 50%, rgba(59,130,246,0.15) 0%, transparent 60%),
-    radial-gradient(ellipse 60% 60% at 80% 20%, rgba(139,92,246,0.10) 0%, transparent 55%),
-    var(--surface-1);
+  background: var(--surface-1);
   position: relative;
   overflow: hidden;
 }
@@ -146,10 +143,8 @@ h1, h2, h3, h4, h5, h6 {
   content: '';
   position: absolute;
   inset: 0;
-  background-image:
-    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
-  background-size: 40px 40px;
+  background: rgba(59,130,246,0.025);
+  pointer-events: none;
 }
 
 .auth-brand-logo {
@@ -163,13 +158,14 @@ h1, h2, h3, h4, h5, h6 {
 .auth-brand-icon {
   width: 48px;
   height: 48px;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--violet) 100%);
+  background: var(--accent);
   border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 24px;
   box-shadow: 0 0 32px var(--accent-glow);
+  opacity: 0.9;
 }
 
 .auth-brand-name {
@@ -194,13 +190,6 @@ h1, h2, h3, h4, h5, h6 {
   color: var(--text-primary);
   margin-bottom: 20px;
   position: relative;
-}
-
-.auth-brand-headline span {
-  background: linear-gradient(135deg, var(--accent-light), var(--violet));
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
 }
 
 .auth-brand-sub {
@@ -1027,6 +1016,49 @@ h1, h2, h3, h4, h5, h6 {
   .pa-row-2, .pa-row-3 { grid-template-columns: 1fr; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
   .med-row { grid-template-columns: 1fr; }
+}
+
+/* Mobile navigation */
+.mobile-nav {
+  display: none;
+}
+
+@media (max-width: 768px) {
+  .mobile-nav {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: var(--surface-1);
+    padding: 12px;
+    border-top: 1px solid var(--border-subtle);
+    z-index: 20;
+  }
+
+  .mobile-nav-item {
+    flex: 1;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    position: relative;
+  }
+
+  .mobile-nav-item.active {
+    color: var(--text-primary);
+  }
+
+  .mobile-nav-icon {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 18px;
+  }
+
+  .mobile-nav-label {
+    display: block;
+    font-size: 12px;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════

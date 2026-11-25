@@ -112,7 +112,7 @@ function AuthPage({ onLogin, alert, setAlert }) {
       {/* Left branding panel */}
       <div className="auth-brand">
         <div className="auth-brand-logo">
-          <div className="auth-brand-icon">💊</div>
+          <div className="auth-brand-icon" aria-hidden="true"><i className="bi bi-capsule" /></div>
           <div>
             <div className="auth-brand-name">PharmAssist AI</div>
             <div className="auth-brand-tagline">Dispensing Portal</div>
@@ -120,20 +120,19 @@ function AuthPage({ onLogin, alert, setAlert }) {
         </div>
 
         <h1 className="auth-brand-headline">
-          Clinical workflows,<br />
-          <span>AI-powered.</span>
+          One workspace for<br />
+          <span>clinical dispensing.</span>
         </h1>
         <p className="auth-brand-sub">
-          A role-based pharmacy management platform combining Groq AI prescription extraction,
-          3NF-normalised PostgreSQL records, and real-time duplicate ingredient detection.
+          Prescription management, branch inventory, and verified dispensing in a focused role-based workspace.
         </p>
 
         <div className="auth-features">
           {[
-            { dot: "#3b82f6", text: "Groq LLM prescription OCR & NLP extraction" },
-            { dot: "#10b981", text: "Automatic duplicate active-ingredient alerts" },
-            { dot: "#8b5cf6", text: "Full RBAC: Admin → Manager → Pharmacist → Doctor" },
-            { dot: "#f59e0b", text: "Branch-locked inventory & dispensing controls" },
+            { dot: "#3b82f6", text: "AI-assisted prescription extraction" },
+            { dot: "#10b981", text: "Duplicate ingredient detection" },
+            { dot: "#8b5cf6", text: "Role-based access controls" },
+            { dot: "#f59e0b", text: "Branch-specific inventory" },
           ].map((f, i) => (
             <div key={i} className="auth-feature-item">
               <div className="auth-feature-dot" style={{ background: f.dot }} />
@@ -274,7 +273,7 @@ function AuthPage({ onLogin, alert, setAlert }) {
 
         {mode === "login" && (
           <p style={{ marginTop: 20, fontSize: 12, color: "var(--text-muted)", textAlign: "center" }}>
-            Patients track order history via the separate Patient Companion App.
+            
           </p>
         )}
       </div>
@@ -333,7 +332,7 @@ function PortalShell({ user, onLogout, children, activeSection, setActiveSection
       {/* ── Sidebar ── */}
       <aside className="sidebar">
         <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">💊</div>
+          <div className="sidebar-logo-icon" aria-hidden="true"><i className="bi bi-capsule" /></div>
           <div className="sidebar-logo-text">
             <div className="sidebar-app-name">PharmAssist</div>
             <div className="sidebar-app-ver">AI Portal</div>
@@ -395,6 +394,23 @@ function PortalShell({ user, onLogout, children, activeSection, setActiveSection
             <span style={{ fontSize: 13, color: "var(--text-secondary)" }}>{user.full_name}</span>
           </div>
         </header>
+
+        <nav className="mobile-nav" aria-label="Portal sections">
+          {navItems.map(item => (
+            <button
+              key={item.id}
+              className={`mobile-nav-item ${activeSection === item.id ? "active" : ""}`}
+              onClick={() => setActiveSection(item.id)}
+            >
+              <i className={`bi ${item.icon}`} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+          <button className="mobile-nav-item" onClick={onLogout}>
+            <i className="bi bi-box-arrow-left" />
+            <span>Sign Out</span>
+          </button>
+        </nav>
 
         <div className="page-body">
           {children}
